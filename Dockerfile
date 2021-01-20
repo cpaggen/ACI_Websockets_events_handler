@@ -14,4 +14,4 @@ RUN pip3 install -r requirements.txt --proxy proxy.esl.cisco.com:80
 COPY aci-src/ .
 
 # command to run on container start
-ENTRYPOINT ["python","./events.py"]
+ENTRYPOINT ["python","-u","./events.py"]
