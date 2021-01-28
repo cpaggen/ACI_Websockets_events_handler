@@ -1,80 +1,106 @@
-# simple Python code to subscribe to ACI event channel
-# single threaded, no AAA refresh (will probably break after 60 minutes)
-# quick PoC-level quality - use at your own risks
-# cpaggen
-
-import json
-import websockets
-import os
-import sys
-from sys import stdout
+#!/usr/local/bin/python
+import websocket
+import threading
 import requests
+import yaml
+import json
+import time
 import ssl
-import asyncio
-import logging
-    
+import sys
+import os 
+
+requests.packages.urllib3.disable_warnings()
+
+# Variables for input and output data
+loginToken = ""
+aciUser = os.environ['APIC_USER']
+aciPwd = os.environ['APIC_PWD']
+apic = os.environ['APIC_IP']
+tenant = os.environ['TENANT']
+webexRoom = os.environ['WEBEX_ROOMID']
+webexAPI = "https://api.ciscospark.com/"
+auth_token = os.environ['WEBEX_TOKEN']
+subId = ''
 proxies = {
  "http": "http://proxy.esl.cisco.com:80",
  "https": "http://proxy.esl.cisco.com:80",
  "no_proxy": "10.48.168.221"
 }
 
-def sendWebex(msg):
-    # you can obtain the room ID from the Webex API after inviting your chatbot to that room
-    print("%%DEBUG%% sendWebex received {} {}".format(type(msg),msg))
+
+def apicLogin():
+    body = {"aaaUser": {"attributes": {"name": aciUser, "pwd": aciPwd}}}
+    resp = requests.post(
+            'https://' + apic + '/api/aaaLogin.json',
+            headers = {'Content-Type': 'application/json'},
+            json = body,
+            verify = False
+    )
+
+    respJson = json.loads(resp.text)
+    try:
+        token = respJson['imdata'][0]['aaaLogin']['attributes']['token']
+    except KeyError:
+        token = 0
+    return token
+
+def subscribe(loginToken):
+    global subId
+    sub = '/api/node/class/fvTenant.json?query-target-filter=and(eq(fvTenant.name,"' + tenant + '"))'
+    resp = requests.get(
+        "https://" + apic + sub + "&query-target=subtree&subscription=yes&refresh-timeout=600",
+        headers = {'Cookie': "APIC-cookie=" + loginToken},
+        verify = False
+        )
+    subId=json.loads(resp.text)['subscriptionId']
+    print("Subscription id is {}".format(subId))
+
+def refresh():
+    global subId
+    while True:
+        time.sleep(10)
+        loginToken = apicLogin()
+        print("Refreshing sub {}".format(subId))
+        resp = requests.get(
+                "https://" + apic + "/api/subscriptionRefresh.json?id=" + subId,
+                headers = {'Cookie': "APIC-cookie=" + loginToken},
+                verify = False
+                )
+        respJson = json.loads(resp.text)['totalCount']
+        if respJson == '0':
+            print("Sub refreshed successfully")
+
+def on_message(ws, msg):
+    msg = json.loads(msg)
     tenant = msg['imdata'][0]['fvTenant']['attributes']['dn']
     attr = msg['imdata'][0]['fvTenant']['attributes']
     msg = "Tenant {} is reporting {}".format(tenant,attr)
-    webexRoom = os.environ['WEBEX_ROOMID']
-    webexAPI = "https://api.ciscospark.com/"
-    auth_token = os.environ['WEBEX_TOKEN']
     headers = {
       "Authorization": "Bearer " + auth_token,
       "Content-Type": "application/json"
     }
     payload = {"roomId": webexRoom, "text": msg,}
     resp = requests.post(webexAPI + "messages", headers=headers, json=payload, proxies=proxies)
-    logging.info("%%DEBUG%% sendWebex {}".format(resp.text))
 
-def getCookie(url):
-    aciUser = os.environ['APIC_USER']
-    aciPwd = os.environ['APIC_PWD']
-    body = {"aaaUser": {"attributes": {"name": aciUser, "pwd": aciPwd}}}
-    logging.info("%%DEBUG%% getting cookie from url {} with user {} pass {}".format(url,aciUser,aciPwd))
-    login_response = requests.post(url, json=body, verify=False)
-    response_body = login_response.content
-    response_body_dictionary = json.loads(response_body)
-    logging.info("%%DEBUG%% {}".format(response_body_dictionary))
-    token = response_body_dictionary["imdata"][0]["aaaLogin"]["attributes"]["token"]
-    cookie = {"APIC-cookie": token}
-    return cookie
+def on_error(ws, error):
+    print("we have a websocket error :/")
 
-async def getEvents(cookie):
-    apic = os.environ['APIC_IP']
-    tenant = os.environ['TENANT']
-    tenant_url = 'https://' + apic + '/api/node/class/fvTenant.json?query-target-filter=and(eq(fvTenant.name,"' + tenant + '"))&query-target=subtree&subscription=yes&refresh-timeout=60m0s'
-    websocket_url = "wss://{}/socket{}".format(apic,cookie['APIC-cookie'])
-    logging.info("%%DEBUG%% tenant URL is {}".format(tenant_url))
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-    context.verify_mode = ssl.CERT_NONE
-    async with websockets.connect(websocket_url, ssl=context) as websocket:
-        tenant_subscription = requests.get(tenant_url, verify=False, cookies=cookie)
-        json_dict = json.loads(tenant_subscription.text)
-        logging.info("%%DEBUG%% Tenant subscription {}".format(json_dict))
-        while True:
-            data = json.loads(await websocket.recv())
-            sendWebex(data)
-    
+def on_close(ws):
+    print("Closing socket now.")
+
+def on_open(ws):
+    subscribe(loginToken)
 
 if __name__ == "__main__":
-    apic = os.environ['APIC_IP']
-    tenant = os.environ['TENANT']
-    logger = logging.getLogger('mylogger')
-    logger.setLevel(logging.DEBUG) # set logger level
-    consoleHandler = logging.StreamHandler(stdout) #set streamhandler to stdout
-    logger.addHandler(consoleHandler)
-    logging.info("%%DEBUG%% Launching with {} {}".format(apic,tenant))
-    apicAaa = "https://" + apic + "/api/aaaLogin.json"
-    cookie = getCookie(apicAaa)
-    logging.info(cookie)
-    asyncio.get_event_loop().run_until_complete(getEvents(cookie))
+    loginToken = apicLogin()
+    if not loginToken:
+        sys.exit("APIC login failure")
+    refreshThread = threading.Thread(target=refresh)
+    refreshThread.start()
+    websocket.enableTrace(True)
+    ws = websocket.WebSocketApp("wss://" + apic + "/socket" + loginToken,
+                                on_message = on_message,
+                                on_error = on_error,
+                                on_close = on_close)
+    ws.on_open = on_open
+    ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
