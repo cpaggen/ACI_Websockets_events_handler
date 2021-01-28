@@ -1,11 +1,10 @@
 #!/usr/local/bin/python
+import ssl
 import websocket
 import threading
 import requests
-import yaml
 import json
 import time
-import ssl
 import sys
 import os 
 
@@ -58,7 +57,7 @@ def subscribe(loginToken):
 def refresh():
     global subId
     while True:
-        time.sleep(10)
+        time.sleep(60)
         loginToken = apicLogin()
         print("Refreshing sub {}".format(subId))
         resp = requests.get(
