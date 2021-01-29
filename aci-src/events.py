@@ -18,7 +18,7 @@ apic = os.environ['APIC_IP']
 tenant = os.environ['TENANT']
 webexRoom = os.environ['WEBEX_ROOMID']
 webexAPI = "https://api.ciscospark.com/"
-auth_token = os.environ['WEBEX_TOKEN']
+webexToken = os.environ['WEBEX_TOKEN']
 subId = ''
 proxies = {
  "http": "http://proxy.esl.cisco.com:80",
@@ -26,14 +26,24 @@ proxies = {
  "no_proxy": "10.48.168.221"
 }
 
+mdTemplate = '''
+**Event {}**
+- user: *{}*
+- what: *{}*
+- description: *{}*
+- affected   : *{}*
+- changeSet  : *{}*
+- timestamp  : *{}*
+\n
+'''
 
 def apicLogin():
     body = {"aaaUser": {"attributes": {"name": aciUser, "pwd": aciPwd}}}
     resp = requests.post(
             'https://' + apic + '/api/aaaLogin.json',
             headers = {'Content-Type': 'application/json'},
-            json = body,
-            verify = False
+            json = body,    
+        verify = False
     )
 
     respJson = json.loads(resp.text)
@@ -47,7 +57,7 @@ def subscribe(loginToken):
     global subId
     sub = '/api/node/class/fvTenant.json?query-target-filter=and(eq(fvTenant.name,"' + tenant + '"))'
     resp = requests.get(
-        "https://" + apic + sub + "&query-target=subtree&subscription=yes&refresh-timeout=600",
+        "https://" + apic + sub + "&query-target=subtree&rsp-subtree-include=audit-logs,no-scoped&rsp-prop-include=all&subscription=yes&refresh-timeout=600",
         headers = {'Cookie': "APIC-cookie=" + loginToken},
         verify = False
         )
@@ -70,16 +80,23 @@ def refresh():
             print("Sub refreshed successfully")
 
 def on_message(ws, msg):
-    msg = json.loads(msg)
-    tenant = msg['imdata'][0]['fvTenant']['attributes']['dn']
-    attr = msg['imdata'][0]['fvTenant']['attributes']
-    msg = "Tenant {} is reporting {}".format(tenant,attr)
+    msg = json.loads(msg)['imdata'][0]
+    msgTstamp = msg["aaaModLR"]["attributes"]["created"]
+    msgId  = msg["aaaModLR"]["attributes"]["id"]
+    msgUser = msg["aaaModLR"]["attributes"]["user"]
+    msgInd = msg["aaaModLR"]["attributes"]["ind"]
+    msgDescr = msg["aaaModLR"]["attributes"]["descr"]
+    msgAffected = msg["aaaModLR"]["attributes"]["affected"]
+    msgChangeSet = msg["aaaModLR"]["attributes"]["changeSet"]
+    mdMsg = mdTemplate.format(msgId,msgUser,msgInd,msgDescr,msgAffected,msgChangeSet,msgTstamp)
+    print("%%DEBUG%% on_message received type {} => {}".format(type(msg),msg))
     headers = {
-      "Authorization": "Bearer " + auth_token,
+      "Authorization": "Bearer " + webexToken,
       "Content-Type": "application/json"
     }
-    payload = {"roomId": webexRoom, "text": msg,}
+    payload = {"roomId": webexRoom, "markdown": mdMsg,}
     resp = requests.post(webexAPI + "messages", headers=headers, json=payload, proxies=proxies)
+    print("%%DEBUG%% webex response {}".format(resp.text))
 
 def on_error(ws, error):
     print("we have a websocket error :/")
