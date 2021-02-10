@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/local/bin/python3
 import ssl
 import websocket
 import threading
@@ -10,7 +10,6 @@ import os
 
 requests.packages.urllib3.disable_warnings()
 
-# Variables for input and output data
 loginToken = ""
 aciUser = os.environ['APIC_USER']
 aciPwd = os.environ['APIC_PWD']
