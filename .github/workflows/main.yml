@@ -1,4 +1,4 @@
-name: build docker image
+name: buildDocker
 on: [push]
 jobs: 
   build: 
