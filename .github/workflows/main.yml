@@ -2,14 +2,16 @@ name: build docker image
 on: 
   release: 
     types: [published]
-jobs: build: runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v1
-    - name: Login to local docker
-      run: docker login -u cisco -p cisco localhost:5000
-    - name: Build the tagged Docker image
-      run: docker build -t acieventscicd:gitlab .
-    - name: Tag the image
-      run: docker tag acieventscicd:gitlab localhost:5000/acieventscicd:gitlab
-    - name: Push the image
-      run: docker push localhost:5000/acieventscicd:gitlab
+jobs: 
+  build: 
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Login to local docker
+        run: docker login -u cisco -p cisco localhost:5000
+      - name: Build the tagged Docker image
+        run: docker build -t acieventscicd:gitlab .
+      - name: Tag the image
+        run: docker tag acieventscicd:gitlab localhost:5000/acieventscicd:gitlab
+      - name: Push the image
+        run: docker push localhost:5000/acieventscicd:gitlab
