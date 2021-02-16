@@ -4,4 +4,4 @@ APIC_IP=10.48.168.221
 TENANT=newDemoTenant4
 APIC_USER=admin
 APIC_PWD=ins3965!
-no_proxy="10.48.168.221"
+no_proxy="localhost, 10.48.168.221"
